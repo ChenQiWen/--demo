@@ -70,7 +70,7 @@
     </div>
 
 <script>
-// V4.1 - Data Structure Museum with Integrated Details (Bug Fix)
+// V4.2 - Data Structure Museum with String Support for BST
 
 // --- DOM Elements ---
 const canvas = document.getElementById('main-canvas');
@@ -115,11 +115,11 @@ const controlTemplates = {
     BST: `
         <h2 class="text-xl font-bold text-gray-700 mb-3">2. 操作节点</h2>
         <div class="flex items-stretch gap-2">
-            <input type="number" id="node-value-input" class="w-full p-2 border rounded-md" placeholder="数值 (1-99)">
+            <input type="text" id="node-value-input" class="w-full p-2 border rounded-md" placeholder="数值或字符串">
             <button id="insert-btn" class="control-btn bg-green-500 text-white font-semibold px-4 rounded-md">插入</button>
         </div>
         <div class="flex items-stretch gap-2 mt-2">
-            <input type="number" id="search-value-input" class="w-full p-2 border rounded-md" placeholder="数值 (1-99)">
+            <input type="text" id="search-value-input" class="w-full p-2 border rounded-md" placeholder="数值或字符串">
             <button id="search-btn" class="control-btn bg-yellow-500 text-white font-semibold px-4 rounded-md">查找</button>
         </div>
          <div class="mt-4">
@@ -479,10 +479,24 @@ class DataStructureVisualizer {
             input.value = '';
         } else {
             const input = document.getElementById('node-value-input');
-            const value = parseInt(input.value, 10);
-            if (!isNaN(value) && value > 0 && value < 100) {
-                 if(currentType === 'HEAP') this.heapInsert(value);
-                 else this.binaryTreeInsert(value);
+            let value = input.value.trim();
+            if (!value) {
+                alert("请输入一个有效的值。");
+                return;
+            }
+
+            // Try to convert to number if it's a valid number string, otherwise use as string
+            const numValue = parseFloat(value);
+            const processedValue = (!isNaN(numValue) && String(numValue) === value) ? numValue : value;
+
+            if(currentType === 'HEAP') {
+                if (typeof processedValue !== 'number') {
+                    alert("堆结构在此演示中仅支持数字。");
+                    return;
+                }
+                this.heapInsert(processedValue);
+            } else { // For BST, AVL, RBT
+                 this.binaryTreeInsert(processedValue);
             }
             input.value = '';
         }
@@ -534,25 +548,37 @@ class DataStructureVisualizer {
     
     // --- INSERTION LOGIC ---
     binaryTreeInsert(value, silent = false) {
-        // A placeholder for BST/AVL/RBT logic
-        // This would be a huge function dispatching to the correct implementation
         if (!this.root) {
             this.root = new BinaryNode(value);
             if(currentType === 'RBT') this.root.color = 'black';
         } else {
             let current = this.root;
             while (true) {
+                if (value === current.value) {
+                    if (!silent) alert(`值 "${value}" 已存在。`);
+                    return;
+                }
                 if (value < current.value) {
-                    if (current.left) current = current.left;
-                    else { current.left = new BinaryNode(value); current.left.parent = current; break; }
-                } else {
-                    if (current.right) current = current.right;
-                    else { current.right = new BinaryNode(value); current.right.parent = current; break; }
+                    if (current.left) {
+                        current = current.left;
+                    } else {
+                        current.left = new BinaryNode(value);
+                        current.left.parent = current;
+                        break;
+                    }
+                } else { // value > current.value
+                    if (current.right) {
+                        current = current.right;
+                    } else {
+                        current.right = new BinaryNode(value);
+                        current.right.parent = current;
+                        break;
+                    }
                 }
             }
         }
         if(!silent) {
-            this.addStep('final', { message: `插入 ${value} (简化版)` });
+            this.addStep('final', { message: `插入 "${value}" (简化版)` });
             this.runAnimation();
         }
     }
@@ -588,7 +614,7 @@ class DataStructureVisualizer {
         }
         current.isEndOfWord = true;
         if(!silent) {
-            this.addStep('final', { highlight: current, message: `标记 '${word}' 结束` });
+            this.addStep('final', { message: `标记 '${word}' 结束` });
             this.runAnimation();
         }
     }
