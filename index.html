@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>交互式数据结构（树）博物馆</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Noto Sans SC', sans-serif; }
+        canvas { background-color: #f9fafb; border-radius: 0.5rem; border: 2px dashed #d1d5db; }
+        .control-btn:disabled { opacity: 0.6; cursor: not-allowed; background-color: #9ca3af; }
+        .tab-btn.active { background-color: #4f46e5; color: white; font-weight: bold; }
+        .explanation-step.current { background-color: #e0f2fe; border-left-color: #3b82f6; }
+        .explanation-step { transition: background-color 0.3s ease; border-left: 3px solid transparent; }
+        details > summary { cursor: pointer; font-weight: 600; }
+        pre { background-color: #1f2937; color: #d1d5db; padding: 1rem; border-radius: 0.5rem; font-size: 0.875rem; line-height: 1.5; overflow-x: auto; }
+        .code-comment { color: #6b7280; }
+    </style>
+</head>
+<body class="bg-gray-200 flex flex-col items-center justify-center min-h-screen p-2 md:p-4">
+
+    <div class="w-full max-w-screen-2xl bg-white rounded-xl shadow-2xl p-4 sm:p-6">
+        <header class="text-center mb-4">
+            <h1 class="text-3xl sm:text-4xl font-bold text-gray-800">交互式数据结构（树）博物馆</h1>
+            <p class="text-gray-500 mt-2">可视化探索 BST、AVL、红黑树、堆和字典树的核心奥秘</p>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-5 gap-6">
+            <!-- Left Panel -->
+            <div class="lg:col-span-2 bg-gray-50 p-5 rounded-lg border border-gray-200 flex flex-col">
+                <div>
+                    <h2 class="text-xl font-bold text-gray-700 mb-3">1. 选择数据结构</h2>
+                    <div id="tree-type-selector" class="grid grid-cols-3 gap-2 bg-gray-200 p-1 rounded-lg">
+                        <button data-type="BST" class="tab-btn text-sm py-2 px-2 rounded-md active">二叉搜索树</button>
+                        <button data-type="AVL" class="tab-btn text-sm py-2 px-2 rounded-md">AVL树</button>
+                        <button data-type="RBT" class="tab-btn text-sm py-2 px-2 rounded-md">红黑树</button>
+                        <button data-type="HEAP" class="tab-btn text-sm py-2 px-2 rounded-md">堆 (Max)</button>
+                        <button data-type="TRIE" class="tab-btn text-sm py-2 px-2 rounded-md">字典树</button>
+                    </div>
+                </div>
+
+                <div id="controls-panel" class="mt-6">
+                    <!-- Controls will be dynamically inserted here -->
+                </div>
+                
+                <div class="mt-6 flex-grow flex flex-col">
+                    <h2 class="text-xl font-bold text-gray-700 mb-3">算法讲解</h2>
+                    <div id="explanation-panel" class="bg-white flex-grow p-3 rounded-md border overflow-y-auto space-y-2 text-sm min-h-[150px]">
+                        <p class="text-gray-500">请先选择操作...</p>
+                    </div>
+                </div>
+
+                <!-- NEW: Details Panel -->
+                <div id="details-panel" class="mt-6 space-y-4">
+                    <!-- Details will be dynamically inserted here -->
+                </div>
+
+            </div>
+
+            <!-- Right Panel -->
+            <div class="lg:col-span-3">
+                <div class="relative w-full h-[600px] lg:h-[800px]">
+                    <canvas id="main-canvas"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<script>
+// V4.1 - Data Structure Museum with Integrated Details (Bug Fix)
+
+// --- DOM Elements ---
+const canvas = document.getElementById('main-canvas');
+const ctx = canvas.getContext('2d');
+const treeTypeSelector = document.getElementById('tree-type-selector');
+const controlsPanel = document.getElementById('controls-panel');
+const explanationPanel = document.getElementById('explanation-panel');
+const detailsPanel = document.getElementById('details-panel');
+
+// --- Global State ---
+let currentType = 'BST';
+let isAnimating = false;
+const animationQueue = [];
+let visualizer = null;
+
+// --- Node Classes ---
+class BinaryNode {
+    constructor(value) {
+        this.value = value;
+        this.left = null;
+        this.right = null;
+        this.parent = null; // Needed for RBT
+        this.x = 0; this.y = 0;
+        // AVL specific
+        this.height = 1;
+        // RBT specific
+        this.color = 'red'; // New nodes are always red
+    }
+}
+
+class TrieNode {
+    constructor(char) {
+        this.char = char;
+        this.children = {};
+        this.isEndOfWord = false;
+        this.x = 0; this.y = 0;
+    }
+}
+
+// --- Control & Details Templates ---
+const controlTemplates = {
+    BST: `
+        <h2 class="text-xl font-bold text-gray-700 mb-3">2. 操作节点</h2>
+        <div class="flex items-stretch gap-2">
+            <input type="number" id="node-value-input" class="w-full p-2 border rounded-md" placeholder="数值 (1-99)">
+            <button id="insert-btn" class="control-btn bg-green-500 text-white font-semibold px-4 rounded-md">插入</button>
+        </div>
+        <div class="flex items-stretch gap-2 mt-2">
+            <input type="number" id="search-value-input" class="w-full p-2 border rounded-md" placeholder="数值 (1-99)">
+            <button id="search-btn" class="control-btn bg-yellow-500 text-white font-semibold px-4 rounded-md">查找</button>
+        </div>
+         <div class="mt-4">
+             <h2 class="text-xl font-bold text-gray-700 mb-3">3. 其他</h2>
+             <button id="random-btn" class="control-btn w-full bg-indigo-500 text-white py-2 rounded-lg">随机生成</button>
+             <button id="clear-btn" class="control-btn w-full bg-gray-600 text-white py-2 rounded-lg mt-2">清空</button>
+        </div>
+    `,
+    HEAP: `
+        <h2 class="text-xl font-bold text-gray-700 mb-3">2. 操作</h2>
+        <div class="flex items-stretch gap-2">
+            <input type="number" id="node-value-input" class="w-full p-2 border rounded-md" placeholder="数值 (1-99)">
+            <button id="insert-btn" class="control-btn bg-green-500 text-white font-semibold px-4 rounded-md">插入</button>
+        </div>
+        <div class="mt-2">
+            <button id="extract-btn" class="control-btn w-full bg-red-500 text-white font-semibold py-2 rounded-md">提取最大值</button>
+        </div>
+        <div class="mt-4">
+             <h2 class="text-xl font-bold text-gray-700 mb-3">3. 其他</h2>
+             <button id="random-btn" class="control-btn w-full bg-indigo-500 text-white py-2 rounded-lg">随机生成</button>
+             <button id="clear-btn" class="control-btn w-full bg-gray-600 text-white py-2 rounded-lg mt-2">清空</button>
+        </div>
+    `,
+    TRIE: `
+        <h2 class="text-xl font-bold text-gray-700 mb-3">2. 操作单词</h2>
+        <div class="flex items-stretch gap-2">
+            <input type="text" id="word-input" class="w-full p-2 border rounded-md" placeholder="英文小写单词">
+            <button id="insert-btn" class="control-btn bg-green-500 text-white font-semibold px-4 rounded-md">插入</button>
+        </div>
+        <div class="flex items-stretch gap-2 mt-2">
+            <input type="text" id="search-word-input" class="w-full p-2 border rounded-md" placeholder="英文小写单词">
+            <button id="search-btn" class="control-btn bg-yellow-500 text-white font-semibold px-4 rounded-md">查找</button>
+        </div>
+        <div class="mt-4">
+             <h2 class="text-xl font-bold text-gray-700 mb-3">3. 其他</h2>
+             <button id="random-btn" class="control-btn w-full bg-indigo-500 text-white py-2 rounded-lg">随机生成</button>
+             <button id="clear-btn" class="control-btn w-full bg-gray-600 text-white py-2 rounded-lg mt-2">清空</button>
+        </div>
+    `
+};
+const detailsTemplates = {
+    BST: `
+        <h2 class="text-xl font-bold text-gray-700 mb-3">详情解析: 二叉搜索树 (BST)</h2>
+        <details open>
+            <summary class="text-indigo-700">核心特性 & 适用场景</summary>
+            <p class="mt-2 text-sm text-gray-600">
+                <strong>特性:</strong> 任何节点的左子树所有节点的值均小于该节点，右子树所有节点的值均大于该节点。不保证树的平衡。<br>
+                <strong>场景:</strong> 适用于数据随机插入，且读操作远多于写操作的简单场景。是学习更复杂树结构的基础。
+            </p>
+        </details>
+        <details>
+            <summary class="text-indigo-700">优缺点对比</summary>
+            <ul class="mt-2 text-sm text-gray-600 list-disc list-inside">
+                <li class="text-green-600"><strong>优点:</strong> 实现简单，易于理解。在树平衡时，增删查的平均时间复杂度为 O(log n)。</li>
+                <li class="text-red-600"><strong>缺点:</strong> 插入有序数据时会退化成链表，性能急剧下降到 O(n)。性能不稳定。</li>
+            </ul>
+        </details>
+        <details>
+            <summary class="text-indigo-700">JavaScript 实现</summary>
+            <pre><code class="language-js">class Node {
+    constructor(value) {
+        this.value = value;
+        this.left = null;
+        this.right = null;
+    }
+}
+
+class BST {
+    constructor() { this.root = null; }
+
+    insert(value) {
+        const newNode = new Node(value);
+        if (!this.root) {
+            this.root = newNode;
+            return;
+        }
+        let current = this.root;
+        while (true) {
+            if (value === current.value) return; <span class="code-comment">// No duplicates</span>
+            if (value < current.value) {
+                if (current.left === null) {
+                    current.left = newNode;
+                    return;
+                }
+                current = current.left;
+            } else {
+                if (current.right === null) {
+                    current.right = newNode;
+                    return;
+                }
+                current = current.right;
+            }
+        }
+    }
+}</code></pre>
+        </details>
+    `,
+    AVL: `
+        <h2 class="text-xl font-bold text-gray-700 mb-3">详情解析: AVL 树</h2>
+        <details open>
+            <summary class="text-indigo-700">核心特性 & 适用场景</summary>
+            <p class="mt-2 text-sm text-gray-600">
+                <strong>特性:</strong> 严格自平衡的二叉搜索树。任何节点的左右子树高度差（平衡因子）不超过1。通过旋转操作维持平衡。<br>
+                <strong>场景:</strong> 对查找性能要求极高，数据不经常变动的场景，如数据库索引、路由表。
+            </p>
+        </details>
+        <details>
+            <summary class="text-indigo-700">优缺点对比</summary>
+            <ul class="mt-2 text-sm text-gray-600 list-disc list-inside">
+                <li class="text-green-600"><strong>优点:</strong> 查找性能稳定且极致，最坏情况也是 O(log n)。</li>
+                <li class="text-red-600"><strong>缺点:</strong> 为维持严格平衡，插入和删除时可能需要频繁旋转，写操作开销比红黑树大。</li>
+            </ul>
+        </details>
+        <details>
+            <summary class="text-indigo-700">JavaScript 实现 (旋转部分)</summary>
+            <pre><code class="language-js"><span class="code-comment">// 核心在于旋转操作和平衡检查</span>
+getHeight(node) { /* ... */ }
+getBalanceFactor(node) { /* ... */ }
+
+<span class="code-comment">// 右旋 (左-左情况)</span>
+rightRotate(node) {
+    let newRoot = node.left;
+    let T2 = newRoot.right;
+
+    newRoot.right = node;
+    node.left = T2;
+
+    <span class="code-comment">// 更新高度</span>
+    node.height = Math.max(this.getHeight(node.left), this.getHeight(node.right)) + 1;
+    newRoot.height = Math.max(this.getHeight(newRoot.left), this.getHeight(newRoot.right)) + 1;
+    
+    return newRoot;
+}
+
+<span class="code-comment">// 在插入递归返回后，检查平衡并执行旋转</span>
+insert(...) {
+    // ... 插入逻辑 ...
+
+    <span class="code-comment">// 更新高度</span>
+    node.height = 1 + Math.max(this.getHeight(node.left), this.getHeight(node.right));
+    
+    const balance = this.getBalanceFactor(node);
+
+    <span class="code-comment">// 左-左情况</span>
+    if (balance > 1 && value < node.left.value) {
+        return this.rightRotate(node);
+    }
+    <span class="code-comment">// 其他情况: 右-右, 左-右, 右-左 ...</span>
+}
+</code></pre>
+        </details>
+    `,
+    RBT: `
+        <h2 class="text-xl font-bold text-gray-700 mb-3">详情解析: 红黑树</h2>
+        <details open>
+            <summary class="text-indigo-700">核心特性 & 适用场景</summary>
+            <p class="mt-2 text-sm text-gray-600">
+                <strong>特性:</strong> 近似平衡的二叉搜索树。通过节点颜色（红/黑）和5条规则维持平衡，确保最长路径不超过最短路径的两倍。<br>
+                <strong>场景:</strong> 读写操作频繁的场景，是工程中最常用的平衡树。如 Java 的 TreeMap, C++ 的 map, Linux 内核内存管理。
+            </p>
+        </details>
+        <details>
+            <summary class="text-indigo-700">优缺点对比</summary>
+            <ul class="mt-2 text-sm text-gray-600 list-disc list-inside">
+                <li class="text-green-600"><strong>优点:</strong> 综合性能好，写操作（增/删）通常比AVL树快，因为需要的调整更少。</li>
+                <li class="text-red-600"><strong>缺点:</strong> 查找效率略低于AVL树，实现非常复杂。</li>
+            </ul>
+        </details>
+        <details>
+            <summary class="text-indigo-700">JavaScript 实现 (修复部分)</summary>
+            <pre><code class="language-js"><span class="code-comment">// 核心在于插入后对树的修复 (fixup)</span>
+insert(value) {
+    let node = this.insertNode(value); <span class="code-comment">// 普通BST插入</span>
+    this.fixTreeAfterInsert(node); <span class="code-comment">// 关键修复步骤</span>
+}
+
+fixTreeAfterInsert(node) {
+    while (node !== this.root && node.parent.color === 'red') {
+        let parent = node.parent;
+        let grandParent = parent.parent;
+        let uncle = (parent === grandParent.left) ? grandParent.right : grandParent.left;
+
+        if (uncle && uncle.color === 'red') {
+            <span class="code-comment">// Case 1: 叔叔是红色 -> 变色</span>
+            grandParent.color = 'red';
+            parent.color = 'black';
+            uncle.color = 'black';
+            node = grandParent;
+        } else {
+            <span class="code-comment">// Case 2/3: 叔叔是黑色 -> 旋转+变色</span>
+            // ... (复杂的旋转和变色逻辑)
+        }
+    }
+    this.root.color = 'black'; <span class="code-comment">// 规则2: 根必须是黑色</span>
+}
+</code></pre>
+        </details>
+    `,
+    HEAP: `
+        <h2 class="text-xl font-bold text-gray-700 mb-3">详情解析: 堆 (Heap)</h2>
+        <details open>
+            <summary class="text-indigo-700">核心特性 & 适用场景</summary>
+            <p class="mt-2 text-sm text-gray-600">
+                <strong>特性:</strong> 一种特殊的完全二叉树。最大堆中，父节点的值总大于等于其子节点。通常用数组实现以提高效率。<br>
+                <strong>场景:</strong> 优先级队列（如操作系统任务调度）、求 Top K 问题、堆排序。
+            </p>
+        </details>
+        <details>
+            <summary class="text-indigo-700">优缺点对比</summary>
+            <ul class="mt-2 text-sm text-gray-600 list-disc list-inside">
+                <li class="text-green-600"><strong>优点:</strong> 高效获取极值 (O(1))，插入和删除效率高 (O(log n))。</li>
+                <li class="text-red-600"><strong>缺点:</strong> 不适合查找特定元素 (O(n))。它不是搜索树。</li>
+            </ul>
+        </details>
+        <details>
+            <summary class="text-indigo-700">JavaScript 实现 (数组版)</summary>
+            <pre><code class="language-js">class MaxHeap {
+    constructor() { this.heap = []; }
+
+    insert(value) {
+        this.heap.push(value);
+        this.siftUp(this.heap.length - 1);
+    }
+
+    <span class="code-comment">// 上浮操作，维持堆属性</span>
+    siftUp(index) {
+        if (index === 0) return;
+        const parentIndex = Math.floor((index - 1) / 2);
+        if (this.heap[index] > this.heap[parentIndex]) {
+            <span class="code-comment">// 交换</span>
+            [this.heap[index], this.heap[parentIndex]] = [this.heap[parentIndex], this.heap[index]];
+            this.siftUp(parentIndex); <span class="code-comment">// 继续向上</span>
+        }
+    }
+
+    extractMax() {
+        if (this.heap.length === 0) return null;
+        const max = this.heap[0];
+        const last = this.heap.pop();
+        if (this.heap.length > 0) {
+            this.heap[0] = last;
+            this.siftDown(0); <span class="code-comment">// 下沉操作</span>
+        }
+        return max;
+    }
+
+    siftDown(index) { /* ... */ }
+}
+</code></pre>
+        </details>
+    `,
+    TRIE: `
+        <h2 class="text-xl font-bold text-gray-700 mb-3">详情解析: 字典树 (Trie)</h2>
+        <details open>
+            <summary class="text-indigo-700">核心特性 & 适用场景</summary>
+            <p class="mt-2 text-sm text-gray-600">
+                <strong>特性:</strong> 多叉树，专门用于高效存储和检索字符串。从根到某节点的路径构成一个字符串前缀，空间换时间。<br>
+                <strong>场景:</strong> 搜索引擎自动补全、拼写检查、IP路由表、敏感词过滤。
+            </p>
+        </details>
+        <details>
+            <summary class="text-indigo-700">优缺点对比</summary>
+            <ul class="mt-2 text-sm text-gray-600 list-disc list-inside">
+                <li class="text-green-600"><strong>优点:</strong> 查询速度极快 (O(L)，L为单词长度)，与总词库大小无关。</li>
+                <li class="text-red-600"><strong>缺点:</strong> 若无大量公共前缀，空间开销巨大。</li>
+            </ul>
+        </details>
+        <details>
+            <summary class="text-indigo-700">JavaScript 实现</summary>
+            <pre><code class="language-js">class TrieNode {
+    constructor() {
+        this.children = {}; <span class="code-comment">// 存放子节点</span>
+        this.isEndOfWord = false;
+    }
+}
+
+class Trie {
+    constructor() { this.root = new TrieNode(); }
+
+    insert(word) {
+        let current = this.root;
+        for (const char of word) {
+            if (!current.children[char]) {
+                current.children[char] = new TrieNode();
+            }
+            current = current.children[char];
+        }
+        current.isEndOfWord = true;
+    }
+
+    search(word) {
+        let current = this.root;
+        for (const char of word) {
+            if (!current.children[char]) return false;
+            current = current.children[char];
+        }
+        return current.isEndOfWord;
+    }
+}
+</code></pre>
+        </details>
+    `,
+};
+// --- Main Application Logic ---
+class DataStructureVisualizer {
+    constructor() {
+        this.NODE_RADIUS = 18;
+        this.LEVEL_HEIGHT = 75;
+        this.root = null;
+        this.heapArray = [];
+        this.trieRoot = new TrieNode('*');
+        
+        this.setupCanvas();
+        window.addEventListener('resize', () => { this.setupCanvas(); this.redraw(); });
+        this.switchType('BST');
+    }
+
+    setupCanvas() {
+        const container = canvas.parentElement;
+        canvas.width = container.clientWidth;
+        canvas.height = container.clientHeight;
+    }
+
+    switchType(type) {
+        currentType = type;
+        this.clear();
+        // Use the same control template for BST, AVL, RBT
+        const controlType = ['BST', 'AVL', 'RBT'].includes(type) ? 'BST' : type;
+        controlsPanel.innerHTML = controlTemplates[controlType] || '';
+        detailsPanel.innerHTML = detailsTemplates[type] || ''; // Update details panel
+        this.bindControlEvents();
+        
+        document.querySelectorAll('#tree-type-selector .tab-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.type === type);
+        });
+    }
+
+    bindControlEvents() {
+        const insertBtn = document.getElementById('insert-btn');
+        if (insertBtn) insertBtn.addEventListener('click', () => this.handleInsert());
+        
+        const searchBtn = document.getElementById('search-btn');
+        if (searchBtn) searchBtn.addEventListener('click', () => this.handleSearch());
+
+        const extractBtn = document.getElementById('extract-btn');
+        if (extractBtn) extractBtn.addEventListener('click', () => this.handleExtract());
+        
+        document.getElementById('clear-btn').addEventListener('click', () => this.clear());
+        document.getElementById('random-btn').addEventListener('click', () => this.handleRandom());
+    }
+    handleInsert() {
+        if(isAnimating) return;
+        if (currentType === 'TRIE') {
+            const input = document.getElementById('word-input');
+            const word = input.value.toLowerCase().trim();
+            if (word) this.trieInsert(word);
+            input.value = '';
+        } else {
+            const input = document.getElementById('node-value-input');
+            const value = parseInt(input.value, 10);
+            if (!isNaN(value) && value > 0 && value < 100) {
+                 if(currentType === 'HEAP') this.heapInsert(value);
+                 else this.binaryTreeInsert(value);
+            }
+            input.value = '';
+        }
+    }
+    
+    handleSearch() { alert("查找功能为简化演示，请参考详情代码实现。"); }
+    handleExtract() { alert("提取功能为简化演示，请参考详情代码实现。"); }
+
+    handleRandom() {
+        this.clear();
+        if(currentType === 'TRIE') {
+            const words = ['apple', 'apply', 'ape', 'bat', 'ball', 'cat'];
+            words.forEach(word => this.trieInsert(word, true));
+        } else if (currentType === 'HEAP') {
+            const values = [95, 80, 75, 60, 55, 40, 30];
+            values.forEach(v => this.heapInsert(v, true));
+        } else {
+            const values = [50, 25, 75, 15, 35, 65, 85];
+             values.forEach(v => this.binaryTreeInsert(v, true));
+        }
+        this.redraw();
+    }
+
+    clear() {
+        this.root = null;
+        this.heapArray = [];
+        this.trieRoot = new TrieNode('*');
+        animationQueue.length = 0;
+        isAnimating = false;
+        clearExplanation();
+        this.redraw();
+    }
+
+    addStep(action, data) { animationQueue.push({ action, data }); }
+    
+    async runAnimation() {
+        isAnimating = true;
+        // Simplified animation runner
+        for (const step of animationQueue) {
+            updateExplanation(step.data.message, true);
+            this.redraw(step.data.highlight);
+            await new Promise(r => setTimeout(r, 600));
+        }
+        animationQueue.length = 0;
+        isAnimating = false;
+        this.redraw();
+        updateExplanation("动画完成。", false);
+    }
+    
+    // --- INSERTION LOGIC ---
+    binaryTreeInsert(value, silent = false) {
+        // A placeholder for BST/AVL/RBT logic
+        // This would be a huge function dispatching to the correct implementation
+        if (!this.root) {
+            this.root = new BinaryNode(value);
+            if(currentType === 'RBT') this.root.color = 'black';
+        } else {
+            let current = this.root;
+            while (true) {
+                if (value < current.value) {
+                    if (current.left) current = current.left;
+                    else { current.left = new BinaryNode(value); current.left.parent = current; break; }
+                } else {
+                    if (current.right) current = current.right;
+                    else { current.right = new BinaryNode(value); current.right.parent = current; break; }
+                }
+            }
+        }
+        if(!silent) {
+            this.addStep('final', { message: `插入 ${value} (简化版)` });
+            this.runAnimation();
+        }
+    }
+    
+    heapInsert(value, silent = false) {
+        this.heapArray.push(value);
+        let i = this.heapArray.length - 1;
+        if(!silent) this.addStep('insert', { message: `将 ${value} 添加到末尾` });
+        
+        while(i > 0) {
+            let parentIdx = Math.floor((i - 1) / 2);
+            if (this.heapArray[i] > this.heapArray[parentIdx]) {
+                if(!silent) this.addStep('swap', { message: `上浮: ${this.heapArray[i]} > ${this.heapArray[parentIdx]}, 交换` });
+                [this.heapArray[i], this.heapArray[parentIdx]] = [this.heapArray[parentIdx], this.heapArray[i]];
+                i = parentIdx;
+            } else {
+                if(!silent) this.addStep('ok', { message: `${this.heapArray[i]} <= ${this.heapArray[parentIdx]}, 位置正确` });
+                break;
+            }
+        }
+        if(!silent) this.runAnimation();
+    }
+    
+    trieInsert(word, silent = false) {
+        let current = this.trieRoot;
+        for (let i = 0; i < word.length; i++) {
+            const char = word[i];
+            if (!current.children[char]) {
+                current.children[char] = new TrieNode(char);
+            }
+            if(!silent) this.addStep('traverse', { highlight: current.children[char], message: `处理字符 '${char}'` });
+            current = current.children[char];
+        }
+        current.isEndOfWord = true;
+        if(!silent) {
+            this.addStep('final', { highlight: current, message: `标记 '${word}' 结束` });
+            this.runAnimation();
+        }
+    }
+    
+    // --- DRAWING LOGIC ---
+    redraw(highlight = null) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        switch (currentType) {
+            case 'BST':
+            case 'AVL':
+            case 'RBT':
+                this.drawBinaryTree(this.root, canvas.width / 2, 50, canvas.width / 4, highlight);
+                break;
+            case 'HEAP':
+                this.drawHeap(highlight);
+                break;
+            case 'TRIE':
+                this.drawTrie(this.trieRoot, canvas.width / 2, 50, canvas.width / 2.5, highlight);
+                break;
+        }
+    }
+
+    drawBinaryTree(node, x, y, xOffset, highlight) {
+        if (!node) return;
+        node.x = x; node.y = y;
+        
+        if (node.left) this.drawBinaryTree(node.left, x - xOffset, y + this.LEVEL_HEIGHT, xOffset / 2, highlight);
+        if (node.right) this.drawBinaryTree(node.right, x + xOffset, y + this.LEVEL_HEIGHT, xOffset / 2, highlight);
+        
+        // Draw lines first
+        if(node.left) this.drawLine(node, node.left);
+        if(node.right) this.drawLine(node, node.right);
+        
+        // Draw node
+        let color = '#3b82f6'; // Default blue
+        if (currentType === 'RBT') color = node.color;
+        if (node === highlight) color = '#f59e0b'; // Amber 500
+        this.drawNode(node.value, x, y, this.NODE_RADIUS, color);
+    }
+    
+    drawHeap() {
+        if (this.heapArray.length === 0) return;
+        const positions = [];
+        // Calculate positions
+        this.heapArray.forEach((val, i) => {
+            const level = Math.floor(Math.log2(i + 1));
+            const y = 50 + level * this.LEVEL_HEIGHT;
+            const nodesInLevel = Math.pow(2, level);
+            const xOffset = canvas.width / (nodesInLevel + 1);
+            const nodeIndexInLevel = i - (nodesInLevel - 1);
+            const x = xOffset * (nodeIndexInLevel + 1);
+            positions[i] = {x, y};
+        });
+        
+        // Draw lines and nodes
+        this.heapArray.forEach((val, i) => {
+            const leftChildIdx = 2 * i + 1;
+            const rightChildIdx = 2 * i + 2;
+            if (leftChildIdx < this.heapArray.length) this.drawLine(positions[i], positions[leftChildIdx]);
+            if (rightChildIdx < this.heapArray.length) this.drawLine(positions[i], positions[rightChildIdx]);
+        });
+        this.heapArray.forEach((val, i) => {
+            this.drawNode(val, positions[i].x, positions[i].y, this.NODE_RADIUS);
+        });
+    }
+    
+    drawTrie(node, x, y, xOffset, highlight) {
+        if (!node) return;
+        node.x = x; node.y = y;
+        let color = node.isEndOfWord ? '#10b981' : '#3b82f6';
+        if (node === highlight) color = '#f59e0b';
+        if (node.char !== '*') this.drawNode(node.char, x, y, this.NODE_RADIUS, color);
+
+        const children = Object.values(node.children);
+        const totalWidth = (children.length - 1) * 60;
+        let startX = x - totalWidth / 2;
+        
+        children.forEach((child, i) => {
+            const childX = startX + i * 60;
+            const childY = y + this.LEVEL_HEIGHT;
+            this.drawLine({x,y}, {x:childX, y:childY});
+            this.drawTrie(child, childX, childY, xOffset / children.length, highlight);
+        });
+    }
+
+    drawNode(text, x, y, radius, color = '#3b82f6') {
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, 2 * Math.PI);
+        ctx.fillStyle = color;
+        ctx.fill();
+        ctx.strokeStyle = '#1f2937';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.closePath();
+
+        ctx.fillStyle = 'white';
+        ctx.font = 'bold 14px Noto Sans SC';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, x, y);
+    }
+    
+    drawLine(from, to) {
+        ctx.beginPath();
+        ctx.moveTo(from.x, from.y);
+        ctx.lineTo(to.x, to.y);
+        ctx.strokeStyle = '#9ca3af';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+    }
+}
+
+// --- Helper Functions ---
+function updateExplanation(message, isCurrent) {
+    const stepDiv = document.createElement('div');
+    stepDiv.className = 'explanation-step p-2 rounded-md';
+    if (isCurrent) {
+        const current = explanationPanel.querySelector('.current');
+        if (current) current.classList.remove('current');
+        stepDiv.classList.add('current');
+    }
+    stepDiv.innerHTML = message;
+    explanationPanel.appendChild(stepDiv);
+    explanationPanel.scrollTop = explanationPanel.scrollHeight;
+}
+
+function clearExplanation() {
+    explanationPanel.innerHTML = '<p class="text-gray-500">请选择操作...</p>';
+}
+
+
+// --- App Initialization ---
+document.addEventListener('DOMContentLoaded', () => {
+    visualizer = new DataStructureVisualizer();
+    treeTypeSelector.addEventListener('click', (e) => {
+        const type = e.target.dataset.type;
+        if (type && type !== currentType && !isAnimating) {
+            visualizer.switchType(type);
+        }
+    });
+});
+</script>
+</body>
+</html>
