@@ -405,6 +405,7 @@ class Trie {
             if (!current.children[char]) {
                 current.children[char] = new TrieNode();
             }
+            if(!silent) this.addStep('traverse', { highlight: current.children[char], message: `处理字符 '${char}'` });
             current = current.children[char];
         }
         current.isEndOfWord = true;
@@ -439,8 +440,14 @@ class DataStructureVisualizer {
 
     setupCanvas() {
         const container = canvas.parentElement;
-        canvas.width = container.clientWidth;
-        canvas.height = container.clientHeight;
+        const width = container.clientWidth;
+        const height = container.clientHeight;
+        const dpr = window.devicePixelRatio || 1;
+        canvas.style.width = width + 'px';
+        canvas.style.height = height + 'px';
+        canvas.width = Math.floor(width * dpr);
+        canvas.height = Math.floor(height * dpr);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
 
     switchType(type) {
@@ -467,8 +474,10 @@ class DataStructureVisualizer {
         const extractBtn = document.getElementById('extract-btn');
         if (extractBtn) extractBtn.addEventListener('click', () => this.handleExtract());
         
-        document.getElementById('clear-btn').addEventListener('click', () => this.clear());
-        document.getElementById('random-btn').addEventListener('click', () => this.handleRandom());
+        const clearBtn = document.getElementById('clear-btn');
+        if (clearBtn) clearBtn.addEventListener('click', () => this.clear());
+        const randomBtn = document.getElementById('random-btn');
+        if (randomBtn) randomBtn.addEventListener('click', () => this.handleRandom());
     }
     handleInsert() {
         if(isAnimating) return;
@@ -496,6 +505,20 @@ class DataStructureVisualizer {
                 }
                 this.heapInsert(processedValue);
             } else { // For BST, AVL, RBT
+                // Enforce numeric-only for AVL/RBT; BST supports string or number but not mixed
+                if (currentType !== 'BST' && typeof processedValue !== 'number') {
+                    alert("AVL/红黑树在此演示中仅支持数字。");
+                    input.value = '';
+                    return;
+                }
+                if (currentType === 'BST' && this.root) {
+                    const rootType = typeof this.root.value;
+                    if (typeof processedValue !== rootType) {
+                        alert(`BST 当前已存储 ${rootType === 'number' ? '数值' : '字符串'}，请勿混用类型。`);
+                        input.value = '';
+                        return;
+                    }
+                }
                  this.binaryTreeInsert(processedValue);
             }
             input.value = '';
@@ -736,7 +759,7 @@ function updateExplanation(message, isCurrent) {
         if (current) current.classList.remove('current');
         stepDiv.classList.add('current');
     }
-    stepDiv.innerHTML = message;
+    stepDiv.textContent = message;
     explanationPanel.appendChild(stepDiv);
     explanationPanel.scrollTop = explanationPanel.scrollHeight;
 }
